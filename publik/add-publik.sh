@@ -38,7 +38,8 @@
 # in ~/.wispr-bro/publik-repo/slug, the token in the keychain), and a chip
 # whose signed build for this commit is done is not built again.
 #
-# Usage: publik/add-publik.sh v1.0.0-alpha.7
+# Usage: publik/add-publik.sh v1.0.0-alpha.7      (fjenn/wispr-bro's latest release)
+#        publik/add-publik.sh v1.0.0-alpha.7.1    (a publik-only revision of it)
 # Env: as macos.sh; WB_NOTARY_PROFILE defaults to wispr-bro-notary (this Mac).
 set -euo pipefail
 
@@ -51,6 +52,18 @@ TAG="${1:-}"
 [[ "$TAG" == v* ]] || { echo "usage: add-publik.sh v<version>" >&2; exit 2; }
 [[ "$TAG" != *-beta.* ]] || { echo "add-publik.sh: beta versions are not supported yet" >&2; exit 2; }
 VERSION="${TAG#v}"
+# A publik-only revision: v1.0.0-alpha.7.1 is fjenn/wispr-bro's
+# v1.0.0-alpha.7 released again for publik (a fix only the publik edition
+# needs). It sorts after alpha.7 and before alpha.8, so updates keep working
+# on both sides. The version is set in a commit that only the tag points to;
+# main keeps fjenn/wispr-bro's version, so the sync never conflicts.
+BASE_TAG="$TAG"
+REVISION=0
+if [[ "$TAG" =~ ^(v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+)\.[0-9]+$ ]]; then
+  BASE_TAG="${BASH_REMATCH[1]}"
+  REVISION=1
+fi
+BASE_VERSION="${BASE_TAG#v}"
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
 FEED_URL="https://github.com/${REPO}/releases/latest/download/latest-publik.json"
 OUT="${HOME}/wb-release/${VERSION}-publik"
@@ -68,13 +81,13 @@ command -v gh >/dev/null || die "needs the GitHub CLI: brew install gh, then gh 
 gh auth status >/dev/null 2>&1 || die "gh is not signed in: gh auth login"
 [[ "$(git rev-parse --abbrev-ref HEAD)" == "$BRANCH" ]] || die "check out ${BRANCH} first"
 HERE="$(bun -e "console.log(require('./src-tauri/tauri.fork.conf.json').version)")"
-[[ "$HERE" == "$VERSION" ]] || die "this checkout is ${HERE}, the release is ${VERSION}"
+[[ "$HERE" == "$BASE_VERSION" ]] || die "this checkout is ${HERE}, the release is ${BASE_VERSION}"
 [[ -z "$(git status --porcelain)" ]] || die "uncommitted changes; the build must match a pushed commit"
 [[ "$(git remote get-url origin)" == *"${REPO}"* ]] || die "run this in a clone of ${REPO}"
 # The publik edition follows the normal app: only a version fjenn/wispr-bro
 # has released (as its latest) gets a publik release.
 MAIN_TAG="$(gh api "repos/${MAIN_REPO}/releases/latest" --jq '.tag_name')"
-[[ "$MAIN_TAG" == "$TAG" ]] || die "${MAIN_REPO}'s latest release is ${MAIN_TAG}, not ${TAG}"
+[[ "$MAIN_TAG" == "$BASE_TAG" ]] || die "${MAIN_REPO}'s latest release is ${MAIN_TAG}, not ${BASE_TAG}"
 # Lists the publik release's files as "name size digest", one per line.
 assets() { gh api "repos/${REPO}/releases/tags/${TAG}" --jq '.assets[] | "\(.name) \(.size) \(.digest // "")"' 2>/dev/null | sort || true; }
 # WB_PUBLIK_REPLACE=1 rebuilds and uploads over a publik edition already on
@@ -94,13 +107,43 @@ chmod 700 "$STATE"
 
 TMP="$(mktemp -d)"
 chmod 700 "$TMP"
-trap 'rm -rf "$TMP"' EXIT
+trap 'rm -rf "$TMP"; [[ $REVISION == 1 ]] && git checkout -q -f "$BRANCH" 2>/dev/null; true' EXIT
 
 # ---------------------------------------------------------------------------
 # 1. The publik release (this repository only; fjenn/wispr-bro is never touched)
 
 git fetch -q origin "$BRANCH"
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse "origin/${BRANCH}")" ]] || die "push ${BRANCH} first (the release must match a pushed commit)"
+if [[ $REVISION == 1 ]]; then
+  if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+    say "use the pushed tag ${TAG}"
+    git fetch -q origin "refs/tags/${TAG}:refs/tags/${TAG}"
+    git checkout -q "$TAG"
+  else
+    say "the version ${VERSION} in a commit for the tag ${TAG} only"
+    git checkout -q --detach
+    bun -e '
+const fs = require("fs");
+const [base, v] = process.argv.slice(1);
+const swap = (file, from, to) => {
+  const s = fs.readFileSync(file, "utf8");
+  if (!s.includes(from)) throw new Error(file + ": no " + from);
+  fs.writeFileSync(file, s.replace(from, to));
+};
+for (const f of ["package.json", "src-tauri/tauri.fork.conf.json"])
+  swap(f, `"version": "${base}"`, `"version": "${v}"`);
+swap("src-tauri/Cargo.toml", `version = "${base}"`, `version = "${v}"`);
+swap("src-tauri/Cargo.lock", `name = "handy"\nversion = "${base}"`, `name = "handy"\nversion = "${v}"`);
+' "$BASE_VERSION" "$VERSION"
+    ident=()
+    git config user.email >/dev/null || ident=(-c user.name=fjenn -c user.email=fjenn@users.noreply.github.com)
+    git ${ident[@]+"${ident[@]}"} commit -q -am "release: publik edition ${VERSION} (${BASE_TAG} for publik)"
+    git tag "$TAG"
+    git push -q origin "refs/tags/${TAG}"
+  fi
+  [[ "$(bun -e "console.log(require('./src-tauri/tauri.fork.conf.json').version)")" == "$VERSION" ]] \
+    || die "the tag ${TAG} does not carry the version ${VERSION}"
+fi
 if ! gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
   say "create the publik release ${TAG}"
   cat > "${TMP}/notes.md" <<NOTES
@@ -110,6 +153,7 @@ The publik edition of [Wispr Bro](https://github.com/${MAIN_REPO}) ${VERSION}: t
 NOTES
   gh release create "$TAG" -R "$REPO" --target "$(git rev-parse HEAD)" --latest \
     --title "Wispr Bro ${VERSION} (publik edition)" --notes-file "${TMP}/notes.md" >/dev/null
+  [[ $REVISION == 1 ]] && gh release edit "$TAG" -R "$REPO" --latest >/dev/null
 fi
 # WB_PUBLIK_REPLACE=1 rebuilds and uploads over a publik edition already on
 # the release (a fix for the same version); otherwise there is nothing to do.
@@ -349,13 +393,19 @@ if ! grep -q "pub const APP_SLUG: &str = \"${SLUG}\";" "$MOD_RS"; then
   git config user.email >/dev/null || ident=(-c user.name=fjenn -c user.email=fjenn@users.noreply.github.com)
   git ${ident[@]+"${ident[@]}"} commit -q -m "publik: the listing's slug is ${SLUG}"
 fi
-git fetch -q origin "$BRANCH"
-if [[ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/${BRANCH}")" ]]; then
-  git merge-base --is-ancestor "origin/${BRANCH}" HEAD || die "${BRANCH} moved on GitHub; get the newest and run again"
-  git push -q origin "HEAD:${BRANCH}"
+if [[ $REVISION == 0 ]]; then
+  git fetch -q origin "$BRANCH"
+  if [[ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/${BRANCH}")" ]]; then
+    git merge-base --is-ancestor "origin/${BRANCH}" HEAD || die "${BRANCH} moved on GitHub; get the newest and run again"
+    git push -q origin "HEAD:${BRANCH}"
+  fi
 fi
 COMMIT="$(git rev-parse HEAD)"
-git branch -r --contains "$COMMIT" | grep -q . || die "commit ${COMMIT} is not pushed (its source must be public)"
+if [[ $REVISION == 1 ]]; then
+  [[ "$(git ls-remote origin "refs/tags/${TAG}" | cut -f1)" == "$COMMIT" ]] || die "tag ${TAG} is not pushed (its source must be public)"
+else
+  git branch -r --contains "$COMMIT" | grep -q . || die "commit ${COMMIT} is not pushed (its source must be public)"
+fi
 
 # ---------------------------------------------------------------------------
 # 7. Signed builds with the app token, and the self test
@@ -414,8 +464,8 @@ gh release upload "$TAG" -R "$REPO" --clobber "${UP}/latest-publik.json"
 say "check that each repository holds only its own edition"
 CHECK="${OUT}/check"
 rm -rf "$CHECK"; mkdir -p "$CHECK"
-gh api "repos/${MAIN_REPO}/releases/tags/${TAG}" --jq '.assets[].name' | grep -q publik \
-  && die "${MAIN_REPO} ${TAG} has a publik file; it must only hold the normal app"
+gh api "repos/${MAIN_REPO}/releases/tags/${BASE_TAG}" --jq '.assets[].name' | grep -q publik \
+  && die "${MAIN_REPO} ${BASE_TAG} has a publik file; it must only hold the normal app"
 assets | awk '{print $1}' | grep -vE '^(Wispr-Bro-publik_|latest-publik\.json$|SHA256SUMS-publik$)' \
   && die "the publik release has a file that is not the publik edition"
 now="$(gh api "repos/${REPO}/releases/latest" --jq '.tag_name')"

@@ -25,3 +25,9 @@ edition_check() {
   LC_ALL=C grep -qF "$PUBLIK_APP_TOKEN" \
     "$1/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$1/Contents/Info.plist")"
 }
+
+# A publik-only revision of a release (add-publik.sh: v1.0.0-alpha.7.1 on
+# fjenn/wispr-bro's v1.0.0-alpha.7) is checked as the release it revises.
+if [[ "${TAG:-}" =~ ^(v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+)\.[0-9]+$ ]]; then
+  TAG_FOR_CHECK="${BASH_REMATCH[1]}"
+fi
