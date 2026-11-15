@@ -77,8 +77,10 @@ MAIN_TAG="$(gh api "repos/${MAIN_REPO}/releases/latest" --jq '.tag_name')"
 [[ "$MAIN_TAG" == "$TAG" ]] || die "${MAIN_REPO}'s latest release is ${MAIN_TAG}, not ${TAG}"
 # Lists the publik release's files as "name size digest", one per line.
 assets() { gh api "repos/${REPO}/releases/tags/${TAG}" --jq '.assets[] | "\(.name) \(.size) \(.digest // "")"' 2>/dev/null | sort || true; }
-if grep -q '^latest-publik\.json ' <<<"$(assets)"; then
-  die "${TAG} already has the publik edition; nothing to do"
+# WB_PUBLIK_REPLACE=1 rebuilds and uploads over a publik edition already on
+# the release (a fix for the same version); otherwise there is nothing to do.
+if grep -q '^latest-publik\.json ' <<<"$(assets)" && [[ "${WB_PUBLIK_REPLACE:-}" != 1 ]]; then
+  die "${TAG} already has the publik edition; nothing to do (WB_PUBLIK_REPLACE=1 replaces it)"
 fi
 # Notarization: this Mac's keychain profile unless an API key is set (CI).
 if [[ -z "${WB_NOTARY_KEY_PATH:-}" ]]; then
@@ -109,8 +111,10 @@ NOTES
   gh release create "$TAG" -R "$REPO" --target "$(git rev-parse HEAD)" --latest \
     --title "Wispr Bro ${VERSION} (publik edition)" --notes-file "${TMP}/notes.md" >/dev/null
 fi
-if grep -q '^latest-publik\.json ' <<<"$(assets)"; then
-  die "${TAG} already has the publik edition; nothing to do"
+# WB_PUBLIK_REPLACE=1 rebuilds and uploads over a publik edition already on
+# the release (a fix for the same version); otherwise there is nothing to do.
+if grep -q '^latest-publik\.json ' <<<"$(assets)" && [[ "${WB_PUBLIK_REPLACE:-}" != 1 ]]; then
+  die "${TAG} already has the publik edition; nothing to do (WB_PUBLIK_REPLACE=1 replaces it)"
 fi
 
 # ---------------------------------------------------------------------------
