@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The publik edition's sign-in window (publik/rust/src/gate.rs).
+// The publik edition's sign-in page, shown in the app window (publik/rust/src/gate.rs).
 import React from "react";
 import ReactDOM from "react-dom/client";
 import {

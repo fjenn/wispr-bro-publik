@@ -582,6 +582,11 @@ pub fn send_event(event: &str) {
     let url = env_nonempty("PUBLIK_TELEMETRY_URL")
         .unwrap_or_else(|| format!("{}{TELEMETRY_PATH}", env.origin));
     let result = post_event(&env, &url, event);
+    // The event name and status only; never the key or the install id.
+    match &result {
+        Ok(code) => log::info!("publik: usage {event} sent ({code})"),
+        Err(e) => log::warn!("publik: usage {event} not sent: {e}"),
+    }
     if debug {
         let shown = result.map(|code| code.to_string()).unwrap_or_else(|e| e);
         eprintln!("publik-telemetry: {event} -> {shown}");

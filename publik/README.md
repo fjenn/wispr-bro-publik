@@ -30,8 +30,8 @@ never compiles or bundles any of it:
 | Rust         | `publik/rust/`                              | the crate `wb-publik`, an optional dependency of the app that only the `publik` Cargo feature turns on      |
 | Frontend     | `publik/app/`                               | `VITE_WB_EDITION=publik`: `src/fork/vite-inputs.ts` then adds its page as an extra Vite entry               |
 | Tauri config | `publik/tauri.conf.json`                    | passed as an extra `--config`; it turns the Cargo feature on and points the updater at `latest-publik.json` |
-| Release      | `publik/edition.sh`, `publik/add-publik.sh` | `macos.sh --edition publik` sources `edition.sh`; `add-publik.sh` publishes the release in this repository |
-| Sync         | `publik/sync.sh`, `wb-publik-sync.yml`      | hourly: merges fjenn/wispr-bro's `main`, checks the difference is only `publik/layer-files.txt`, pushes    |
+| Release      | `publik/edition.sh`, `publik/add-publik.sh` | `macos.sh --edition publik` sources `edition.sh`; `add-publik.sh` publishes the release in this repository  |
+| Sync         | `publik/sync.sh`, `wb-publik-sync.yml`      | hourly: merges fjenn/wispr-bro's `main`, checks the difference is only `publik/layer-files.txt`, pushes     |
 | Guard        | `publik/guard.ts`                           | always on, inside `bun run wb:guards`                                                                       |
 
 Outside this folder there are only small hooks, each behind
@@ -67,8 +67,8 @@ then `publik/add-publik.sh vX` on the Apple Silicon Mac.
 All of it follows publik's setup guide (publikhq.com/skills/setup.md) and does
 what publik's Rust module does, with the same requests, files and words:
 
-- **Signing in.** At launch, before the Hub, a small "Sign in with publik"
-  window (`publik/rust/src/gate.rs`, page `publik/app/`) checks the computer's
+- **Signing in.** At launch, before the Hub, the app window shows "Sign in with publik"
+  instead of the Hub (`publik/rust/src/gate.rs`, page `publik/app/`) checks the computer's
   publik key (setting one up with `POST /api/v1/installs` the first time) and
   the account behind it (`GET /api/v1/wallet`). Until the person has signed
   in, it offers "Sign in with publik", which opens publik in the browser, and

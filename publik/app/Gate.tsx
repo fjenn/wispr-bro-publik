@@ -42,14 +42,20 @@ export function Gate() {
   };
 
   return (
-    <main className="flex h-screen flex-col justify-center gap-4 bg-(--wb-surface) px-8 text-(--wb-ink) select-none">
+    <main className="relative flex h-screen flex-col items-center justify-center bg-(--wb-surface) px-8 text-(--wb-ink) select-none">
+      {/* The app window's title strip: drag it like the Hub's. */}
+      <div
+        data-tauri-drag-region
+        className="absolute inset-x-0 top-0 h-[46px]"
+        aria-hidden="true"
+      />
       {screen && (
-        <>
-          <h1 className="text-[20px] font-semibold">{screen.title}</h1>
-          <p className="text-[14px] leading-relaxed text-(--wb-ink-2)">
+        <div className="flex w-full max-w-[420px] flex-col items-center gap-4 text-center">
+          <h1 className="text-[24px] font-semibold">{screen.title}</h1>
+          <p className="text-[15px] leading-relaxed text-(--wb-ink-2)">
             {screen.body}
           </p>
-          <div className="flex flex-wrap gap-2 pt-2">
+          <div className="flex flex-wrap justify-center gap-2 pt-2">
             {screen.buttons.map(([id, label], i) => (
               <Button
                 key={id}
@@ -66,7 +72,7 @@ export function Gate() {
               {screen.note}
             </p>
           )}
-        </>
+        </div>
       )}
     </main>
   );

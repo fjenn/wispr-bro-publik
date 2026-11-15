@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{AppHandle, Manager, Runtime};
 
 use super::client::{self, Env, Wallet, UNREACHABLE};
 use super::USES_AI;
@@ -363,7 +363,6 @@ pub fn ensure_signed_in(env: &Env, ui: &mut dyn GateUi) -> Passed {
 // ---------------------------------------------------------------------------
 // The window
 
-pub const WINDOW_LABEL: &str = "publik-gate";
 /// The gate page as Vite emits it (`src/fork/vite-inputs.ts`).
 pub const PAGE: &str = "publik/app/index.html";
 
@@ -405,29 +404,75 @@ pub fn invoke_handler<R: Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + 
     tauri::generate_handler![publik_gate_screen, publik_gate_press]
 }
 
-/// The Hub stays out of sight while the gate stands (the Dock icon or the
-/// menu bar could bring it back).
-fn keep_main_hidden<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(main) = app.get_webview_window("main") {
-        if main.is_visible().unwrap_or(false) {
-            let _ = main.hide();
-            if let Some(gate) = app.get_webview_window(WINDOW_LABEL) {
-                let _ = gate.show();
-                let _ = gate.set_focus();
+/// The app's own window: while the gate stands it shows the sign-in page
+/// instead of the Hub, so opening the app (Dock, menu bar, a second launch)
+/// lands on "Sign in with publik" and never flashes the Hub.
+const MAIN: &str = "main";
+
+fn hub_url() -> &'static Mutex<Option<tauri::Url>> {
+    static HUB: OnceLock<Mutex<Option<tauri::Url>>> = OnceLock::new();
+    HUB.get_or_init(|| Mutex::new(None))
+}
+
+fn gate_url(hub: &tauri::Url) -> Option<tauri::Url> {
+    hub.join(&format!("/{PAGE}")).ok()
+}
+
+fn is_gate_page(url: &tauri::Url) -> bool {
+    url.path().trim_start_matches('/') == PAGE
+}
+
+/// Puts the sign-in page in the app's window (again, if the Hub was rebuilt
+/// meanwhile). `show` also brings the window forward.
+fn gate_in_main<R: Runtime>(app: &AppHandle<R>, show: bool) {
+    let Some(main) = app.get_webview_window(MAIN) else {
+        return;
+    };
+    if let Ok(now) = main.url() {
+        if !is_gate_page(&now) {
+            let hub = {
+                let mut saved = hub_url().lock().ok();
+                if let Some(saved) = saved.as_deref_mut() {
+                    if saved.is_none() {
+                        *saved = Some(now.clone());
+                    }
+                }
+                saved.and_then(|s| s.clone()).unwrap_or(now)
+            };
+            if let Some(gate) = gate_url(&hub) {
+                if let Err(e) = main.navigate(gate) {
+                    log::error!("publik: could not show the sign-in page: {e}");
+                }
             }
         }
+    }
+    if show {
+        let _ = main.unminimize();
+        let _ = main.show();
+        let _ = main.set_focus();
     }
 }
 
 struct WindowUi<R: Runtime> {
     app: AppHandle<R>,
     presses: mpsc::Receiver<String>,
+    /// The sign-in page is put up by the first screen it has to show, so a
+    /// computer that is already signed in goes straight to the app.
+    opened: bool,
 }
 
 impl<R: Runtime> GateUi for WindowUi<R> {
     fn show(&mut self, screen: &Screen, done: Arc<AtomicBool>) -> Option<&'static str> {
         if let Ok(mut current) = shared().screen.lock() {
             *current = Some(screen.clone());
+        }
+        if !self.opened {
+            self.opened = true;
+            // From the gate's thread, after `on_ready` has returned: window
+            // work inside the Ready event deadlocks on Tauri's webview
+            // manager lock (the app hung at launch with no window).
+            gate_in_main(&self.app, true);
+            log::info!("publik: sign-in page shown");
         }
         // A press meant for an earlier screen does not count.
         while self.presses.try_recv().is_ok() {}
@@ -443,14 +488,13 @@ impl<R: Runtime> GateUi for WindowUi<R> {
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
-                // The window is gone; the app is quitting.
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     std::thread::sleep(Duration::from_millis(500));
                 }
             }
             ticks = (ticks + 1) % 5;
             if ticks == 0 {
-                keep_main_hidden(&self.app);
+                gate_in_main(&self.app, false);
             }
         }
     }
@@ -463,30 +507,6 @@ impl<R: Runtime> GateUi for WindowUi<R> {
     }
 }
 
-fn open_window<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    let window = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App(PAGE.into()))
-        .title(SIGN_IN_TITLE)
-        .inner_size(460.0, 340.0)
-        .resizable(false)
-        .maximizable(false)
-        .minimizable(false)
-        .center()
-        .focused(true)
-        .build()?;
-    let handle = app.clone();
-    window.on_window_event(move |event| {
-        // Closing the gate before signing in quits the app.
-        if let WindowEvent::CloseRequested { .. } = event {
-            if !PASSED.load(Ordering::SeqCst) {
-                handle.exit(0);
-            }
-        }
-    });
-    let _ = window.show();
-    let _ = window.set_focus();
-    Ok(())
-}
-
 /// Called by the app's `fork::on_ready` (publik edition only). `true` while
 /// the gate stands: `on_ready` stops there, and `resume` (`on_ready` itself)
 /// runs once the person is signed in.
@@ -497,7 +517,7 @@ pub fn hold<R: Runtime>(app: &AppHandle<R>, resume: fn(&AppHandle<R>)) -> bool {
     if STARTED.swap(true, Ordering::SeqCst) {
         return true;
     }
-    let main = app.get_webview_window("main");
+    let main = app.get_webview_window(MAIN);
     let main_was_visible = main
         .as_ref()
         .is_some_and(|w| w.is_visible().unwrap_or(false));
@@ -510,36 +530,37 @@ pub fn hold<R: Runtime>(app: &AppHandle<R>, resume: fn(&AppHandle<R>)) -> bool {
     }
     let app = app.clone();
     std::thread::spawn(move || {
-        // Built from this thread, after `on_ready` has returned: building a
-        // window inside the Ready event deadlocks on Tauri's webview manager
-        // lock (the app hung at launch with no window).
-        if let Err(e) = open_window(&app) {
-            log::error!("publik: could not open the sign-in window: {e}");
-        }
-        log::info!("publik: sign-in window shown");
         let mut ui = WindowUi {
             app: app.clone(),
             presses: rx,
+            opened: false,
         };
         let passed = ensure_signed_in(&Env::from_process(), &mut ui);
         log::info!(
             "publik: signed in (choice {:?})",
             passed.choice.as_deref().unwrap_or("none")
         );
+        // Someone who just signed in lands in the app, in front.
+        let show_main = main_was_visible || ui.opened;
         PASSED.store(true, Ordering::SeqCst);
         client::start_telemetry();
+        let hub = hub_url().lock().ok().and_then(|h| h.clone());
         let main_app = app.clone();
         let _ = app.run_on_main_thread(move || {
-            if let Some(gate) = main_app.get_webview_window(WINDOW_LABEL) {
-                let _ = gate.destroy();
-            }
-            if main_was_visible {
-                if let Some(main) = main_app.get_webview_window("main") {
+            resume(&main_app);
+            if let Some(main) = main_app.get_webview_window(MAIN) {
+                // The same window now loads the app.
+                if let (Some(hub), Ok(now)) = (hub, main.url()) {
+                    if is_gate_page(&now) {
+                        let _ = main.navigate(hub);
+                    }
+                }
+                if show_main {
+                    let _ = main.unminimize();
                     let _ = main.show();
                     let _ = main.set_focus();
                 }
             }
-            resume(&main_app);
         });
     });
     true
