@@ -408,6 +408,8 @@ gh release upload "$TAG" -R "$REPO" --clobber "${UP}/latest-publik.json"
 # 9. Check
 
 say "check that each repository holds only its own edition"
+CHECK="${OUT}/check"
+rm -rf "$CHECK"; mkdir -p "$CHECK"
 gh api "repos/${MAIN_REPO}/releases/tags/${TAG}" --jq '.assets[].name' | grep -q publik \
   && die "${MAIN_REPO} ${TAG} has a publik file; it must only hold the normal app"
 assets | awk '{print $1}' | grep -vE '^(Wispr-Bro-publik_|latest-publik\.json$|SHA256SUMS-publik$)' \
