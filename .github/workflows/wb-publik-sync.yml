@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Keeps fjenn/wispr-bro-publik in step with fjenn/wispr-bro (publik/sync.sh).
+# On a conflict, or when fjenn/wispr-bro changed a workflow file (which the
+# Actions token may not push), it opens an issue: run publik/sync.sh by hand.
+name: publik sync
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: publik-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'fjenn/wispr-bro-publik'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Merge fjenn/wispr-bro
+        id: sync
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          publik/sync.sh 2>&1 | tee "$RUNNER_TEMP/sync.log"
+      - name: Report a failed sync
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="publik sync needs a hand"
+          open=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          body="The hourly sync from fjenn/wispr-bro stopped: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Run \`publik/sync.sh\` in a clone of this repository, fix what it names, and push."
+          if [ -n "$open" ]; then gh issue comment "$open" --body "$body"; else gh issue create --title "$title" --body "$body"; fi

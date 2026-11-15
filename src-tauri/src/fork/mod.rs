@@ -280,6 +280,8 @@ impl ForkState {
 /// and the panic hook. Keep it free of Tauri calls: it runs before the Tauri
 /// builder exists, while the process is still single-threaded.
 pub fn early_init() {
+    #[cfg(feature = "publik")] // publik/README.md
+    wb_publik::start(env!("CARGO_PKG_VERSION"));
     if let Some((key, value)) = updater_env_to_set(|k| std::env::var(k).ok()) {
         std::env::set_var(key, value);
     }
@@ -517,6 +519,10 @@ pub fn on_ready<R: ForkRuntime>(app: &AppHandle<R>) {
         .unwrap_or(false);
     if headless {
         log::debug!("fork: headless CLI mode, skipping on_ready");
+        return;
+    }
+    #[cfg(all(feature = "publik", not(test)))] // signed in first (publik/README.md)
+    if wb_publik::gate::hold(app, on_ready::<R>) {
         return;
     }
 
@@ -1249,7 +1255,13 @@ where
         .expect("Failed to export fork typescript bindings");
 
     let fork = fork_builder.invoke_handler();
+    #[cfg(feature = "publik")] // the sign-in window (publik/README.md)
+    let gate = wb_publik::gate::invoke_handler::<R>();
     move |invoke: Invoke<R>| {
+        #[cfg(feature = "publik")]
+        if wb_publik::gate::handles(invoke.message.command()) {
+            return gate(invoke);
+        }
         if is_fork_command(invoke.message.command()) {
             fork(invoke)
         } else {

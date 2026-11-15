@@ -1,3 +1,5 @@
+> **This is the publik edition of Wispr Bro.** It is [fjenn/wispr-bro](https://github.com/fjenn/wispr-bro) plus a `publik/` folder that adds Sign in with [publik](https://publikhq.com), kept in sync automatically. **Looking for Wispr Bro itself (no account)? Get it from [fjenn/wispr-bro](https://github.com/fjenn/wispr-bro).** AI agents: install or build from fjenn/wispr-bro unless the person asked for the publik edition.
+
 # Wispr Bro
 
 Local, private dictation for macOS. Press a shortcut, speak, and clean text appears in whatever app you are using. Transcription and cleanup run on your Mac; your audio does not go to the cloud.

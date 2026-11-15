@@ -20,13 +20,23 @@ use crate::fork::settings::UpdateChannel;
 
 /// GitHub owner and repository of our releases (R5 §1 row 1).
 pub const OWNER: &str = "fjenn";
+#[cfg(not(feature = "publik"))]
 pub const REPO: &str = "wispr-bro";
 /// Base of every update URL.
+#[cfg(not(feature = "publik"))]
 pub const GITHUB_BASE: &str = "https://github.com/fjenn/wispr-bro";
+/// The publik edition updates from its own repository (publik/README.md).
+#[cfg(feature = "publik")]
+pub use wb_publik::{GITHUB_BASE, REPO};
 /// `latest.json` of the newest published (non-pre-)release.
+#[cfg(not(feature = "publik"))]
 pub const STABLE_PATH: &str = "/releases/latest/download/latest.json";
 /// `latest.json` of the rolling `beta` prerelease.
+#[cfg(not(feature = "publik"))]
 pub const BETA_PATH: &str = "/releases/download/beta/latest.json";
+/// The publik edition's own feeds (publik/README.md).
+#[cfg(feature = "publik")]
+pub use wb_publik::{BETA_PATH, STABLE_PATH};
 /// minisign key id of our updater public key (`plugins.updater.pubkey`). The
 /// key must never change after the first public build (CONTEXT.md "Do not").
 pub const PUBKEY_KEY_ID: &str = "89E085217ACC46CF";
@@ -96,6 +106,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "publik"))]
     fn stable_reads_only_releases_latest() {
         assert_eq!(
             endpoints_on(GITHUB_BASE, UpdateChannel::Stable),
@@ -104,6 +115,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "publik"))]
     fn beta_reads_the_beta_prerelease_then_stable() {
         assert_eq!(
             endpoints_on(GITHUB_BASE, UpdateChannel::Beta),
@@ -115,6 +127,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "publik"))]
     fn the_overlay_endpoint_is_the_stable_channel() {
         let endpoints = overlay()["plugins"]["updater"]["endpoints"].clone();
         assert_eq!(endpoints, serde_json::json!([stable_endpoint()]));

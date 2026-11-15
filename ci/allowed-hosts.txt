@@ -32,6 +32,12 @@ localhost
 127.0.0.1
 [::1]
 
+[publik]
+# The publik edition only (publik/README.md): allowed only in publik/, which
+# the normal Wispr Bro never builds, and never accepted by the built-bundle
+# scan of the normal build (wb-guard-bundle-hosts.ts, wb-egress.yml).
+publikhq.com                         # sign-in, usage counting and the release self test of the publik edition
+
 [test]
 # Allowed ONLY in fork test code (scripts/wb-guard-hosts.ts: test files
 # `scripts/wb-*.test.ts`, `tests/fork/**`, `#[cfg(test)]`-declared fork
