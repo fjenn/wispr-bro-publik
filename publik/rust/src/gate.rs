@@ -508,11 +508,15 @@ pub fn hold<R: Runtime>(app: &AppHandle<R>, resume: fn(&AppHandle<R>)) -> bool {
     if let Ok(mut presses) = shared().presses.lock() {
         *presses = Some(tx);
     }
-    if let Err(e) = open_window(app) {
-        log::error!("publik: could not open the sign-in window: {e}");
-    }
     let app = app.clone();
     std::thread::spawn(move || {
+        // Built from this thread, after `on_ready` has returned: building a
+        // window inside the Ready event deadlocks on Tauri's webview manager
+        // lock (the app hung at launch with no window).
+        if let Err(e) = open_window(&app) {
+            log::error!("publik: could not open the sign-in window: {e}");
+        }
+        log::info!("publik: sign-in window shown");
         let mut ui = WindowUi {
             app: app.clone(),
             presses: rx,
