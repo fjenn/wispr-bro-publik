@@ -27,7 +27,8 @@ edition_check() {
 }
 
 # A publik-only revision of a release (add-publik.sh: v1.0.0-alpha.7.1 on
-# fjenn/wispr-bro's v1.0.0-alpha.7) is checked as the release it revises.
-if [[ "${TAG:-}" =~ ^(v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+)\.[0-9]+$ ]]; then
-  TAG_FOR_CHECK="${BASH_REMATCH[1]}"
+# fjenn/wispr-bro's v1.0.0-alpha.7) is a stable release of its own; the
+# shared tag parser only knows the release form.
+if [[ "${TAG:-}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+\.[0-9]+)$ ]]; then
+  TAG_INFO_OVERRIDE="$(printf 'version=%s\nchannel=stable\nrelease_tag=%s\n' "${BASH_REMATCH[1]}" "$TAG")"
 fi

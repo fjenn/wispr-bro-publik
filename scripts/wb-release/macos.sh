@@ -112,7 +112,7 @@ step() { printf '\n== %s\n' "$*" | tee -a "$LOG"; }
 die() { echo "macos.sh: $*" | tee -a "$LOG" >&2; exit 1; }
 
 cd "$ROOT"
-TAG_INFO="$(bun scripts/wb-release/tag.ts "${TAG_FOR_CHECK:-$TAG}" --tags /dev/null)" || die "bad tag $TAG"
+TAG_INFO="${TAG_INFO_OVERRIDE:-$(bun scripts/wb-release/tag.ts "$TAG" --tags /dev/null)}" || die "bad tag $TAG"
 RELEASE_TAG="$(sed -n 's/^release_tag=//p' <<<"$TAG_INFO")"
 echo "version ${VERSION}, tag ${TAG}, release ${RELEASE_TAG}, ${ARCH}, ${EDITION}" | tee -a "$LOG"
 
