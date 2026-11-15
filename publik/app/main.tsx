@@ -10,6 +10,7 @@ import {
 import "@/App.css";
 import "@/fork/styles/fonts.css";
 import "@/fork/styles/tokens.css";
+import "@/i18n";
 import { Gate } from "./Gate";
 
 applyTheme(getStoredTheme());

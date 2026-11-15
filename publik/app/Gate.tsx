@@ -8,6 +8,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/fork/ui/Button";
+import { SplitLayout } from "@/fork/onboarding/Layout";
+import { Scene } from "@/fork/onboarding/scenes/Scene";
+import "@/fork/onboarding/onboarding.css";
 
 export interface GateScreen {
   id: string;
@@ -41,38 +44,60 @@ export function Gate() {
     void invoke("publik_gate_press", { id }).catch(() => {});
   };
 
+  const [main, ...others] = screen?.buttons ?? [];
+  // Onboarding's Welcome layout (Design W1): the words and the black action
+  // on the left, the live dictation demo on the right.
   return (
-    <main className="relative flex h-screen flex-col items-center justify-center bg-(--wb-surface) px-8 text-(--wb-ink) select-none">
+    <main className="relative h-screen bg-(--wb-panel) text-(--wb-ink) select-none">
       {/* The app window's title strip: drag it like the Hub's. */}
       <div
         data-tauri-drag-region
-        className="absolute inset-x-0 top-0 h-[46px]"
+        className="absolute inset-x-0 top-0 z-10 h-[46px]"
         aria-hidden="true"
       />
       {screen && (
-        <div className="flex w-full max-w-[420px] flex-col items-center gap-4 text-center">
-          <h1 className="text-[24px] font-semibold">{screen.title}</h1>
-          <p className="text-[15px] leading-relaxed text-(--wb-ink-2)">
-            {screen.body}
-          </p>
-          <div className="flex flex-wrap justify-center gap-2 pt-2">
-            {screen.buttons.map(([id, label], i) => (
+        <SplitLayout
+          title={screen.title}
+          subtitle={screen.body}
+          aside={
+            <div className="w-full max-w-[460px]">
+              <Scene choice="email" />
+            </div>
+          }
+          action={
+            main && (
+              <Button
+                variant="primary"
+                size="lg"
+                block
+                onClick={() => press(main[0])}
+              >
+                {main[1]}
+              </Button>
+            )
+          }
+        >
+          <div className="flex flex-col items-start gap-3">
+            {others.map(([id, label]) => (
               <Button
                 key={id}
-                variant={i === 0 ? "primary" : "secondary"}
+                variant="secondary"
                 size="lg"
                 onClick={() => press(id)}
               >
                 {label}
               </Button>
             ))}
+            {screen.note && (
+              <p
+                role="status"
+                className="m-0 text-[15px] leading-5 text-(--wb-ink-2)"
+              >
+                {screen.note}
+              </p>
+            )}
           </div>
-          {screen.note && (
-            <p role="status" className="text-[13px] text-(--wb-ink-3)">
-              {screen.note}
-            </p>
-          )}
-        </div>
+        </SplitLayout>
       )}
     </main>
   );
