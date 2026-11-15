@@ -428,6 +428,10 @@ fn gate_in_main<R: Runtime>(app: &AppHandle<R>, show: bool) {
     let Some(main) = app.get_webview_window(MAIN) else {
         return;
     };
+    // Handy creates this window titled "Handy" and the app renames it in
+    // `on_ready`, which waits for the sign-in: name it now (Dock menu,
+    // Window menu, Mission Control).
+    let _ = main.set_title(&app.package_info().name);
     if let Ok(now) = main.url() {
         if !is_gate_page(&now) {
             let hub = {
@@ -555,6 +559,7 @@ pub fn hold<R: Runtime>(app: &AppHandle<R>, resume: fn(&AppHandle<R>)) -> bool {
                         let _ = main.navigate(hub);
                     }
                 }
+                let _ = main.set_title(&main_app.package_info().name);
                 if show_main {
                     let _ = main.unminimize();
                     let _ = main.show();
