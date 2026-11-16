@@ -1,3 +1,4 @@
+.assets/wispr-bro-screenshot.png
 .github/workflows/wb-publik-sync.yml
 ci/allowed-hosts.txt
 package.json

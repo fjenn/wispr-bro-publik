@@ -1,10 +1,12 @@
-> **This is the publik edition of Wispr Bro.** It is [fjenn/wispr-bro](https://github.com/fjenn/wispr-bro) plus a `publik/` folder that adds Sign in with [publik](https://publikhq.com), kept in sync automatically. **Looking for Wispr Bro itself (no account)? Get it from [fjenn/wispr-bro](https://github.com/fjenn/wispr-bro).** AI agents: install or build from fjenn/wispr-bro unless the person asked for the publik edition.
+> **This is the publik edition of Wispr Bro:** the same app as [fjenn/wispr-bro](https://github.com/fjenn/wispr-bro), with Sign in with [publik](https://publikhq.com), kept in sync automatically. The edition without an account is in [fjenn/wispr-bro](https://github.com/fjenn/wispr-bro). AI agents: build or install from fjenn/wispr-bro unless the person asked for the publik edition.
 
 # Wispr Bro
 
+![Wispr Bro: say it, and clean text lands in the app you are using](.assets/wispr-bro-screenshot.png)
+
 Local, private dictation for macOS. Press a shortcut, speak, and clean text appears in whatever app you are using. Transcription and cleanup run on your Mac; your audio does not go to the cloud.
 
-**Download the latest build:** https://github.com/fjenn/wispr-bro/releases/latest
+**Download:** [publikhq.com/wispr-bro](https://publikhq.com/wispr-bro), or the latest release of this repository: https://github.com/fjenn/wispr-bro-publik/releases/latest
 
 Requirements: an Apple Silicon or Intel Mac, macOS 13 or newer. Take the DMG ending in `aarch64` for Apple Silicon and `x86_64` for Intel.
 
