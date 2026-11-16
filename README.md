@@ -2,7 +2,7 @@
 
 # Wispr Bro
 
-![Wispr Bro: say it, and clean text lands in the app you are using](.assets/wispr-bro-screenshot.png)
+![Wispr Bro listening while you speak: the words you say become clean text in the app you are using](.assets/wispr-bro-screenshot.png)
 
 Local, private dictation for macOS. Press a shortcut, speak, and clean text appears in whatever app you are using. Transcription and cleanup run on your Mac; your audio does not go to the cloud.
 
