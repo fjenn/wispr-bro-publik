@@ -1,4 +1,5 @@
 .assets/wispr-bro-screenshot.png
+.github/workflows/wb-publik-release.yml
 .github/workflows/wb-publik-sync.yml
 ci/allowed-hosts.txt
 package.json
@@ -11,12 +12,14 @@ publik/guard.test.ts
 publik/guard.ts
 publik/layer-files.txt
 publik/README.md
+publik/release.sh
 publik/rust/.gitignore
 publik/rust/Cargo.toml
 publik/rust/src/client.rs
 publik/rust/src/fake.rs
 publik/rust/src/gate.rs
 publik/rust/src/lib.rs
+publik/set-version.py
 publik/sync.sh
 publik/tauri.conf.json
 publik/tsconfig.json

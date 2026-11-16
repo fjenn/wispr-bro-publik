@@ -20,7 +20,11 @@ use std::process::{Command, Stdio};
 
 use serde_json::{json, Map, Value};
 
-use super::{app_version, APP_SLUG};
+use super::app_version;
+
+/// This app on publik (its listing's slug). publik's scanner looks for this
+/// literal in the same file as the install and telemetry calls.
+pub const APP_SLUG: &str = "wispr-bro";
 
 /// publik's site. `PUBLIK_ORIGIN` overrides it (tests), as in the module.
 pub const DEFAULT_ORIGIN: &str = "https://publikhq.com";
@@ -789,7 +793,6 @@ mod tests {
         for s in ["/api/v1/installs", "/api/v1/telemetry", "\"app_opened\""] {
             assert!(src.contains(s), "{s}");
         }
-        let module = include_str!("lib.rs");
-        assert!(module.contains("APP_SLUG: &str = \""));
+        assert!(src.contains("pub const APP_SLUG: &str = \"wispr-bro\";"));
     }
 }

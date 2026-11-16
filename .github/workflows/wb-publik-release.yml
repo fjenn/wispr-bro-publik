@@ -1,0 +1,208 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Builds, signs, notarizes and publishes the publik edition on GitHub's own
+# Macs when a v* tag is pushed (publik/release.sh pushes it), with build
+# provenance attestations, so every download on publik can be traced to the
+# commit and workflow run that made it. The tag must point at a commit on
+# main whose version is the tag's (scripts/wb-guard-identity.ts checks it).
+name: publik release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "existing tag to build (v<version>)"
+        type: string
+        required: true
+
+concurrency:
+  group: publik-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+  REPO_URL: https://github.com/fjenn/wispr-bro-publik
+
+jobs:
+  check:
+    if: github.repository == 'fjenn/wispr-bro-publik'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+      - name: The tag is on main and carries its version
+        run: |
+          set -euo pipefail
+          git fetch -q origin main
+          git merge-base --is-ancestor HEAD origin/main || { echo "::error::${TAG} is not on main"; exit 1; }
+          v="$(python3 -Ic 'import json; print(json.load(open("src-tauri/tauri.fork.conf.json"))["version"])')"
+          [ "v${v}" = "$TAG" ] || { echo "::error::${TAG} carries version ${v}"; exit 1; }
+
+  build:
+    name: build macOS ${{ matrix.arch }}
+    needs: check
+    runs-on: macos-26
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: [aarch64, x86_64]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.arch == 'x86_64' && 'x86_64-apple-darwin' || '' }}
+
+      - name: Rosetta 2 (runs the Intel sidecar and app checks)
+        if: ${{ matrix.arch == 'x86_64' }}
+        run: /usr/bin/pgrep -q oahd || sudo softwareupdate --install-rosetta --agree-to-license
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          key: ${{ matrix.arch == 'aarch64' && 'publik-release' || 'publik-release-x86_64' }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Import the Developer ID certificate (temporary keychain)
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$APPLE_CERTIFICATE" || { echo "::error::secret APPLE_CERTIFICATE is not set"; exit 1; }
+          kc="$RUNNER_TEMP/wb-signing.keychain-db"
+          kp="$(openssl rand -hex 24)"
+          security create-keychain -p "$kp" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kp" "$kc"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kp" "$kc" > /dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$kc" | grep -q "Developer ID Application: Finn Jennen (446XT9839S)" \
+            || { echo "::error::the certificate is not our Developer ID Application identity"; exit 1; }
+          echo "WB_KEYCHAIN=$kc" >> "$GITHUB_ENV"
+
+      - name: Notary API key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          test -n "$APPLE_API_KEY_P8" || { echo "::error::secret APPLE_API_KEY_P8 is not set"; exit 1; }
+          key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$key"
+          chmod 600 "$key"
+          {
+            echo "WB_NOTARY_KEY_PATH=$key"
+            echo "WB_NOTARY_KEY_ID=$APPLE_API_KEY_ID"
+            echo "WB_NOTARY_ISSUER=$APPLE_API_ISSUER"
+          } >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize, staple (publik edition)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PUBLIK_APP_TOKEN: ${{ secrets.PUBLIK_APP_TOKEN }}
+        run: scripts/wb-release/macos.sh --edition publik --arch "${{ matrix.arch }}" --tag "$TAG" --out release-out
+
+      - name: publik's release self test
+        run: |
+          set -euo pipefail
+          v="${TAG#v}"
+          t="$RUNNER_TEMP/selftest"; mkdir -p "$t"
+          tar -xzf "release-out/Wispr-Bro-publik_${v}_${{ matrix.arch }}.app.tar.gz" -C "$t"
+          app="$(find "$t" -maxdepth 1 -name '*.app' | head -1)"
+          exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+          run=("$app/Contents/MacOS/$exe")
+          [ "${{ matrix.arch }}" = x86_64 ] && run=(arch -x86_64 "${run[@]}")
+          line="$(env -u PUBLIK_APP_TOKEN PUBLIK_SELF_TEST=1 "${run[@]}" 2>/dev/null | grep '^publik self-test:' || true)"
+          echo "${line:-no self-test line}"
+          [ "$line" = "publik self-test: ok wispr-bro ${v}" ] || { echo "::error::self test failed"; exit 1; }
+
+      - name: Build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            release-out/Wispr-Bro-publik_*.dmg
+            release-out/Wispr-Bro-publik_*.app.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: publik-${{ matrix.arch }}
+          path: |
+            release-out/Wispr-Bro-publik_*.dmg
+            release-out/Wispr-Bro-publik_*.app.tar.gz
+            release-out/Wispr-Bro-publik_*.app.tar.gz.sig
+          retention-days: 14
+
+      - name: Remove the keychain and API key
+        if: ${{ always() }}
+        run: |
+          [ -n "${WB_KEYCHAIN:-}" ] && security delete-keychain "$WB_KEYCHAIN" || true
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/download-artifact@v4
+        with:
+          path: up
+          merge-multiple: true
+      - name: Feed, checksums, source, release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          v="${TAG#v}"; P="Wispr-Bro-publik_${v}"
+          cd up
+          for f in "${P}_aarch64.dmg" "${P}_x86_64.dmg" "${P}_aarch64.app.tar.gz" "${P}_x86_64.app.tar.gz" \
+                   "${P}_aarch64.app.tar.gz.sig" "${P}_x86_64.app.tar.gz.sig"; do
+            test -f "$f" || { echo "::error::missing $f"; exit 1; }
+          done
+          bun ../scripts/wb-release/manifest.ts --version "$v" --release-tag "$TAG" --base "$REPO_URL" \
+            --asset "darwin-aarch64=${P}_aarch64.app.tar.gz" \
+            --asset "darwin-x86_64=${P}_x86_64.app.tar.gz" \
+            --out latest-publik.json
+          (cd .. && git archive --format=tar.gz --prefix="wispr-bro-publik-${v}/" -o "up/${P}_source.tar.gz" HEAD)
+          shasum -a 256 "${P}"_* latest-publik.json > SHA256SUMS-publik
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            printf '%s\n\n%s\n' \
+              "The publik edition of [Wispr Bro](https://github.com/fjenn/wispr-bro) ${v}: the same app, with Sign in with [publik](https://publikhq.com). Built, signed and notarized on GitHub Actions, with build provenance attestations." \
+              "**Not here from publik?** Download the normal app, with no account, from [fjenn/wispr-bro](https://github.com/fjenn/wispr-bro/releases/latest)." > notes.md
+            gh release create "$TAG" --verify-tag --latest --title "Wispr Bro ${v} (publik edition)" --notes-file notes.md
+          fi
+          gh release upload "$TAG" --clobber "${P}"_* SHA256SUMS-publik
+          # Last, so the feed never names a file that is not there yet.
+          gh release upload "$TAG" --clobber latest-publik.json
+          gh release edit "$TAG" --latest

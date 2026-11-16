@@ -69,7 +69,7 @@ FEED_URL="https://github.com/${REPO}/releases/latest/download/latest-publik.json
 OUT="${HOME}/wb-release/${VERSION}-publik"
 STATE="${HOME}/.wispr-bro/publik-repo"
 KEYCHAIN_ITEM="wispr-bro-publik-app-token"
-MOD_RS="publik/rust/src/lib.rs"
+MOD_RS="publik/rust/src/client.rs"
 P="Wispr-Bro-publik_${VERSION}"
 N="Wispr-Bro_${VERSION}"
 die() { echo "add-publik.sh: $*" >&2; exit 1; }
@@ -107,7 +107,7 @@ chmod 700 "$STATE"
 
 TMP="$(mktemp -d)"
 chmod 700 "$TMP"
-trap 'rm -rf "$TMP"; [[ $REVISION == 1 ]] && git checkout -q -f "$BRANCH" 2>/dev/null; true' EXIT
+trap 'rm -rf "$TMP"' EXIT
 
 # ---------------------------------------------------------------------------
 # 1. The publik release (this repository only; fjenn/wispr-bro is never touched)
@@ -120,24 +120,12 @@ if [[ $REVISION == 1 ]]; then
     git fetch -q origin "refs/tags/${TAG}:refs/tags/${TAG}"
     git checkout -q "$TAG"
   else
-    say "the version ${VERSION} in a commit for the tag ${TAG} only"
-    git checkout -q --detach
-    bun -e '
-const fs = require("fs");
-const [base, v] = process.argv.slice(1);
-const swap = (file, from, to) => {
-  const s = fs.readFileSync(file, "utf8");
-  if (!s.includes(from)) throw new Error(file + ": no " + from);
-  fs.writeFileSync(file, s.replace(from, to));
-};
-for (const f of ["package.json", "src-tauri/tauri.fork.conf.json"])
-  swap(f, `"version": "${base}"`, `"version": "${v}"`);
-swap("src-tauri/Cargo.toml", `version = "${base}"`, `version = "${v}"`);
-swap("src-tauri/Cargo.lock", `name = "handy"\nversion = "${base}"`, `name = "handy"\nversion = "${v}"`);
-' "$BASE_VERSION" "$VERSION"
+    say "the version ${VERSION} on main, tagged ${TAG}"
+    python3 -I publik/set-version.py "$BASE_VERSION" "$VERSION"
     ident=()
     git config user.email >/dev/null || ident=(-c user.name=fjenn -c user.email=fjenn@users.noreply.github.com)
-    git ${ident[@]+"${ident[@]}"} commit -q -am "release: publik edition ${VERSION} (${BASE_TAG} for publik)"
+    git ${ident[@]+"${ident[@]}"} commit -q -am "release: publik edition ${VERSION}"
+    git push -q origin "HEAD:${BRANCH}"
     git tag "$TAG"
     git push -q origin "refs/tags/${TAG}"
   fi

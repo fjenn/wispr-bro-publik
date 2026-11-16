@@ -20,8 +20,9 @@ pub mod client;
 mod fake;
 pub mod gate;
 
-/// This app on publik (its listing's slug).
-pub const APP_SLUG: &str = "wispr-bro";
+/// This app on publik (its listing's slug). Defined in `client.rs`, the
+/// file publik's scanner reads for the module's strings.
+pub use client::APP_SLUG;
 /// The app's version, given by [`start`] (this crate has its own version).
 static APP_VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
