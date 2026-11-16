@@ -22,7 +22,7 @@ VERSION="${TAG#v}"
 git fetch -q origin main --tags
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || die "main is not origin/main; pull or push first"
 git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null && die "${TAG} exists already"
-gh secret list -R fjenn/wispr-bro-publik | grep -q '^APPLE_CERTIFICATE' || die "the signing secrets are not set (publik/README.md)"
+grep -q '^APPLE_CERTIFICATE' <<<"$(gh secret list -R fjenn/wispr-bro-publik)" || die "the signing secrets are not set (publik/README.md)"
 
 HERE="$(python3 -Ic 'import json; print(json.load(open("src-tauri/tauri.fork.conf.json"))["version"])')"
 if [[ "$HERE" != "$VERSION" ]]; then
