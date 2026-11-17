@@ -67,6 +67,7 @@ TAG=""
 EDITION="standard"
 UNSIGNED=0
 REUSE=0
+MERGE=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
@@ -75,6 +76,7 @@ while [[ $# -gt 0 ]]; do
     --edition) EDITION="$2"; shift 2 ;;
     --unsigned) UNSIGNED=1; shift ;;
     --reuse-app) REUSE=1; shift ;;
+    --merge) MERGE=("$2" "$3"); shift 3 ;;
     *) echo "macos.sh: unknown argument $1" >&2; exit 2 ;;
   esac
 done
@@ -91,7 +93,16 @@ case "$ARCH" in
     TAURI_TARGET=(--target x86_64-apple-darwin)
     LIPO_ARCH=x86_64
     BUNDLE_DIR="${ROOT}/src-tauri/target/x86_64-apple-darwin/release/bundle/macos" ;;
-  *) echo "macos.sh: --arch aarch64 or x86_64, not $ARCH" >&2; exit 2 ;;
+  universal)
+    # One app for both chips: the finished Apple Silicon and Intel apps
+    # (--merge <aarch64.app> <x86_64.app>), every Mach-O joined with lipo,
+    # then signed, notarized and packaged below like any build.
+    [[ ${#MERGE[@]} == 2 && -d "${MERGE[0]}" && -d "${MERGE[1]}" ]] || {
+      echo "macos.sh: --arch universal needs --merge <aarch64.app> <x86_64.app>" >&2; exit 2; }
+    TAURI_TARGET=()
+    LIPO_ARCH="arm64 x86_64"
+    BUNDLE_DIR="" ;;  # set under $OUT below
+  *) echo "macos.sh: --arch aarch64, x86_64 or universal, not $ARCH" >&2; exit 2 ;;
 esac
 # The sidecar for the same target (ci/llama-server/build.sh).
 export WB_TARGET="${ARCH}-apple-darwin"
@@ -106,6 +117,7 @@ VERSION="$(bun -e "console.log(require('${ROOT}/src-tauri/tauri.fork.conf.json')
 TAG="${TAG:-v${VERSION}}"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
+[[ "$ARCH" == universal ]] && BUNDLE_DIR="${OUT}/universal-build"
 LOG="${OUT}/release.log"
 : > "$LOG"
 step() { printf '\n== %s\n' "$*" | tee -a "$LOG"; }
@@ -144,6 +156,7 @@ notarize() { # <file> <label>
   [[ "$status" == "Accepted" ]] || die "notarization of ${label} failed; see ${OUT}/notary-${label}-log.json"
 }
 
+if [[ "$ARCH" != universal ]]; then
 step "llama-server sidecar"
 ci/llama-server/build.sh --if-missing 2>&1 | tail -3 | tee -a "$LOG"
 SIDECAR="$(ci/llama-server/build.sh --print-path)"
@@ -153,6 +166,7 @@ if [[ $UNSIGNED == 0 ]]; then
     --identifier com.wisprbro.desktop.llama-server --sign "$IDENTITY" "$SIDECAR"
   codesign --verify --strict "$SIDECAR"
   echo "sidecar signed: $(codesign -dv "$SIDECAR" 2>&1 | grep -E '^(TeamIdentifier|CodeDirectory)' | tr '\n' ' ')" | tee -a "$LOG"
+fi
 fi
 
 step "tauri build (.app)"
@@ -175,7 +189,19 @@ else
   fi
 fi
 APP="${BUNDLE_DIR}/${PRODUCT}.app"
-if [[ $REUSE == 1 && -d "$APP" ]]; then
+if [[ "$ARCH" == universal ]]; then
+  rm -rf "$BUNDLE_DIR"; mkdir -p "$BUNDLE_DIR"
+  ditto "${MERGE[0]}" "$APP"
+  joined=0
+  while IFS= read -r -d '' f; do
+    rel="${f#"${MERGE[0]}"/}"
+    grep -q 'Mach-O' <<<"$(file -b "$f")" || continue
+    [[ -f "${MERGE[1]}/${rel}" ]] || die "the Intel app has no ${rel}"
+    lipo -create "$f" "${MERGE[1]}/${rel}" -output "${APP}/${rel}"
+    joined=$((joined + 1))
+  done < <(find "${MERGE[0]}" -type f -print0)
+  echo "joined ${joined} Mach-O file(s) for arm64 + x86_64" | tee -a "$LOG"
+elif [[ $REUSE == 1 && -d "$APP" ]]; then
   echo "reusing $APP" | tee -a "$LOG"
 else
   bun tauri build "${BUILD_CONFIG[@]}" ${TAURI_TARGET[@]+"${TAURI_TARGET[@]}"} --bundles app 2>&1 | tee -a "${OUT}/tauri-build.log" | tail -25
@@ -184,12 +210,18 @@ fi
 arch_bad=0
 while IFS= read -r -d '' f; do
   grep -q 'Mach-O' <<<"$(file -b "$f")" || continue
-  [[ " $(lipo -archs "$f") " == *" ${LIPO_ARCH} "* ]] || { echo "  ✗ ${f#"$APP"/}: $(lipo -archs "$f"), want ${LIPO_ARCH}" | tee -a "$LOG"; arch_bad=1; }
+  for want in $LIPO_ARCH; do
+    [[ " $(lipo -archs "$f") " == *" ${want} "* ]] || { echo "  ✗ ${f#"$APP"/}: $(lipo -archs "$f"), want ${LIPO_ARCH}" | tee -a "$LOG"; arch_bad=1; }
+  done
 done < <(find "$APP/Contents" -type f -print0)
 [[ $arch_bad == 0 ]] || die "Mach-O files built for the wrong architecture"
 
 step "edition guard (${EDITION}; a normal build with anything of publik fails)"
-bun publik/guard.ts --edition "$EDITION" --dist dist --binary "$APP" | tee -a "$LOG" || die "edition guard"
+if [[ "$ARCH" == universal ]]; then
+  bun publik/guard.ts --edition "$EDITION" --binary "$APP" | tee -a "$LOG" || die "edition guard"
+else
+  bun publik/guard.ts --edition "$EDITION" --dist dist --binary "$APP" | tee -a "$LOG" || die "edition guard"
+fi
 [[ "$EDITION" == standard ]] || edition_check "$APP" || die "the ${EDITION} build lacks its app token"
 
 if [[ $UNSIGNED == 0 ]]; then
@@ -258,8 +290,13 @@ notarize "$DMG" dmg
 xcrun stapler staple "$DMG" | tee -a "$LOG"
 
 step "${FEED} + ${SUMS}"
+if [[ "$ARCH" == universal ]]; then
+  FEED_ASSETS=(--asset "darwin-aarch64=${TARBALL}" --asset "darwin-x86_64=${TARBALL}")
+else
+  FEED_ASSETS=(--asset "darwin-${ARCH}=${TARBALL}")
+fi
 bun scripts/wb-release/manifest.ts --version "$VERSION" --release-tag "$RELEASE_TAG" \
-  --asset "darwin-${ARCH}=${TARBALL}" --out "${OUT}/${FEED}" | tee -a "$LOG"
+  "${FEED_ASSETS[@]}" --out "${OUT}/${FEED}" | tee -a "$LOG"
 ( cd "$OUT" && shasum -a 256 "$(basename "$DMG")" "$(basename "$TARBALL")" \
   "$(basename "$TARBALL").sig" "$FEED" > "$SUMS" )
 
